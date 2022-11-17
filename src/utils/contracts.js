@@ -1,50 +1,46 @@
 import { ethers } from "ethers";
+import usdt from "../../deployments/localhost/UsdtContract.json";
+import usdc from "../../deployments/localhost/UsdcContract.json";
+import usdv from "../../deployments/localhost/UsdvContract.json";
 import pf from "../../deployments/localhost/PriceFeed.json";
 import ss from "../../deployments/localhost/StableSwap.json";
 
-const { stableSwap, priceFeed } = await instantiateContracts();
+const { stableSwap, priceFeed, utmc, ucmc, uvmc } = await instantiateContracts();
 
 async function instantiateContracts() {
   const web3provider = new ethers.providers.Web3Provider(window.ethereum),
     provider = new ethers.providers.JsonRpcProvider("http://127.0.0.1:8545/"),
     web3signer = web3provider.getSigner(),
     signer = provider.getSigner(),
+    utmc = new ethers.Contract(usdt.address, usdt.abi, web3signer),
+    ucmc = new ethers.Contract(usdc.address, usdc.abi, web3signer),
+    uvmc = new ethers.Contract(usdv.address, usdv.abi, web3signer),
     priceFeed = new ethers.Contract(pf.address, pf.abi, signer),
     stableSwap = new ethers.Contract(ss.address, ss.abi, web3signer);
 
   return {
     stableSwap,
     priceFeed,
+    utmc,
+    ucmc,
+    uvmc,
   };
 }
 
-async function deposit(fromToken, toToken, fromAmount, toAmount) {
-  try {
-    const pair = `${fromToken}/${toToken}`,
-      user = await stableSwap.signer.getAddress(),
-      tok1Contract =
-        fromToken === "UCMC" ? usdcContract : fromToken === "UTMC" ? usdtContract : null,
-      tok2Contract = toToken === "UCMC" ? usdcContract : toToken === "UTMC" ? usdtContract : null;
+async function deposit(pool, tokenAmounts) {
+  const user = await stableSwap.signer.getAddress(),
+    tokens = Object.keys(tokenAmounts),
+    contracts = tokens.map((token) => (token === "UTMC" ? utmc : token === "UCMC" ? ucmc : uvmc)),
+    amounts = Object.values(tokenAmounts).map((amount) =>
+      ethers.utils.parseEther(amount.toString())
+    );
 
-    if ((await tok1Contract.allowance(user, stableSwap.address)) < fromAmount)
-      await tok1Contract.approve(stableSwap.address, fromAmount);
-
-    if ((await tok2Contract.allowance(user, stableSwap.address)) < toAmount)
-      await tok2Contract.approve(stableSwap.address, toAmount);
-
-    await stableSwap.deposit(pair, fromAmount, toAmount);
-  } catch (err) {
-    console.log(`Error on depositing ERC20/ERC20 pair. ${err}`);
+  for (let i = 0; i < contracts.length; i++) {
+    const allowance = await contracts[i].allowance(ss.address, user);
+    if (allowance < amounts[i]) await contracts[i].approve(ss.address, amounts[i]);
   }
-}
 
-async function provideLiquidity(fromToken, fromAmount, toToken, toAmount) {
-  await deposit(
-    fromToken,
-    toToken,
-    ethers.utils.parseEther(fromAmount),
-    ethers.utils.parseEther(toAmount)
-  );
+  await stableSwap.deposit(pool, amounts);
 }
 
 async function swap(fromToken, toToken, amount) {
@@ -94,15 +90,15 @@ async function getRelativePrice(fromToken, toToken, fromAmount) {
   return await getPrice(fromToken, toToken, fromAmount);
 }
 
-async function estimateBalancedDeposit(fromToken, toToken, fromAmount) {
-  let pair = `${fromToken}/${toToken}`;
-  if (!(await stableSwap.poolExists(pair))) pair = `${toToken}/${fromToken}`;
+async function estimatePoolPrices(pool, token, amount) {
+  const tokens = pool.split("/"),
+    tokenIndex = tokens.indexOf(token),
+    prices = await stableSwap.estimateDeposit(pool, tokenIndex, amount);
 
-  return ethers.utils.formatEther(
-    (await stableSwap.estimateDeposit(pair, ethers.utils.parseEther(amount), t1ToT2))
-      .div(10 ** 8)
-      .div(10 ** 8)
-  );
+  const tokenPrices = {};
+  for (let i = 0; i < prices.length; i++) tokenPrices[tokens[i]] = prices[i];
+
+  return tokenPrices;
 }
 
 async function getAllTokens() {
@@ -120,24 +116,19 @@ async function getActivePools() {
   const pools = {},
     poolNames = await stableSwap.getContracts();
   for (let poolName of poolNames) {
-    pools[poolName] = [poolName.split("/")];
+    if (await stableSwap.poolExists(poolName)) pools[poolName] = poolName.split("/");
   }
-
   console.log(pools);
+
   return pools;
 }
 
-//async function test() {
-//  console.log(ethers.utils.formatEther(await stableSwap.calculateD("UTMC/UCMC")));
-//}
+async function test() {
+  const amount = ethers.utils.parseEther("1000");
+  await utmc.approve(ss.address, amount);
+  console.log(await stableSwap.swap("UTMC/UCMC/UVMC", 0, 1, amount));
+}
 
-//await test();
+await test();
 
-export {
-  provideLiquidity,
-  getRelativePrice,
-  getAllTokens,
-  swapTokens,
-  estimateBalancedDeposit,
-  getActivePools,
-};
+export { deposit, getRelativePrice, getAllTokens, swapTokens, estimatePoolPrices, getActivePools };

@@ -30,7 +30,7 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
     usdvAggregator = await deploy("UsdvAggregator", {
       from: deployer,
       log: true,
-      args: [18, 1500],
+      args: [1, 1],
     }),
     pf = await deploy("PriceFeed", {
       from: deployer,
@@ -44,6 +44,6 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
   await deploy("StableSwap", {
     from: deployer,
     log: true,
-    args: [[[usdt.address, usdc.address, usdv.address]], [["UTMC", "UCMC", "USDV"]], pf.address],
+    args: [[[usdt.address, usdc.address, usdv.address]], [["UTMC", "UCMC", "UVMC"]], pf.address],
   });
 };

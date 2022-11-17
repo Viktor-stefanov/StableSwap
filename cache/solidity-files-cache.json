@@ -1180,8 +1180,8 @@
       ]
     },
     "/home/viktor/Dev/Blockchain/StableSwap/contracts/StableSwap.sol": {
-      "lastModificationDate": 1668543938395,
-      "contentHash": "5fb52d0c2fca496b2bbce3d155016e66",
+      "lastModificationDate": 1668618977218,
+      "contentHash": "66d8df12a15ea524e3bc1018d0cfaa22",
       "sourceName": "contracts/StableSwap.sol",
       "solcConfig": {
         "version": "0.8.17",
@@ -1226,8 +1226,8 @@
       ]
     },
     "/home/viktor/Dev/Blockchain/StableSwap/contracts/UsdvContract.sol": {
-      "lastModificationDate": 1668544256603,
-      "contentHash": "7296f2d3270c7b00923849a1dd780177",
+      "lastModificationDate": 1668544478991,
+      "contentHash": "3fbe0459879b6b01de21634a83926859",
       "sourceName": "contracts/UsdvContract.sol",
       "solcConfig": {
         "version": "0.8.17",
