@@ -43,60 +43,47 @@ async function deposit(pool, tokenAmounts) {
   await stableSwap.deposit(pool, amounts);
 }
 
-async function swap(fromToken, toToken, amount) {
-  try {
-    let pair = `${fromToken}/${toToken}`,
-      t1ToT2 = true,
-      tokenCon = fromToken === "UCMC" ? usdcContract : fromToken === "UTMC" ? usdtContract : null;
+async function swap(pool, fromToken, toToken, amount) {
+  const ethAmount = ethers.utils.parseEther(amount),
+    fromTokenIndex = pool.split("/").indexOf(fromToken),
+    toTokenIndex = pool.split("/").indexOf(toToken),
+    tokenCon = fromToken === "UCMC" ? ucmc : fromToken === "UTMC" ? utmc : null;
 
-    if (!(await stableSwap.poolExists(pair))) {
-      pair = `${toToken}/${fromToken}`;
-      t1ToT2 = false;
-      tokenCon = toToken === "UCMC" ? usdcContract : toToken === "UTMC" ? usdtContract : null;
-    }
+  const user = await tokenCon.signer.getAddress();
+  if ((await tokenCon.allowance(ss.address, user)) < ethAmount)
+    await tokenCon.approve(ss.address, ethAmount);
 
-    const user = await tokenCon.signer.getAddress();
-    if ((await tokenCon.allowance(stableSwap.address, user)) < amount)
-      await tokenCon.approve(stableSwap.address, amount);
-
-    console.log(await stableSwap.poolExists(pair));
-    console.log(tokenCon.address);
-    await stableSwap.swap(pair, amount, t1ToT2);
-  } catch (err) {
-    console.log(`Error on swapping ERC20 for ERC20. ${err}`);
-  }
+  await stableSwap.swap(pool, fromTokenIndex, toTokenIndex, ethAmount);
 }
 
-async function swapTokens(fromToken, fromAmount, toToken) {
-  await swap(fromToken, toToken, ethers.utils.parseEther(fromAmount));
-}
-
-async function getPrice(fromToken, toToken, amount) {
-  let pair = `${fromToken}/${toToken}`,
-    t1ToT2 = true;
-  if (!(await stableSwap.poolExists(pair))) {
-    pair = `${toToken}/${fromToken}`;
-    t1ToT2 = false;
-  }
+async function getRelativePrice(pool, fromToken, toToken, amount) {
+  const fromTokenIndex = pool.split("/").indexOf(fromToken);
+  const toTokenIndex = pool.split("/").indexOf(toToken);
 
   const equivalentAmount = ethers.utils.formatEther(
-    await stableSwap.getRelativePrice(pair, ethers.utils.parseEther(amount), t1ToT2)
+    await stableSwap.getRelativePrice(
+      pool,
+      fromTokenIndex,
+      toTokenIndex,
+      ethers.utils.parseEther(amount)
+    )
   );
 
   return equivalentAmount;
 }
 
-async function getRelativePrice(fromToken, toToken, fromAmount) {
-  return await getPrice(fromToken, toToken, fromAmount);
-}
-
 async function estimatePoolPrices(pool, token, amount) {
   const tokens = pool.split("/"),
     tokenIndex = tokens.indexOf(token),
-    prices = await stableSwap.estimateDeposit(pool, tokenIndex, amount);
+    prices = await stableSwap.estimateDeposit(
+      pool,
+      tokenIndex,
+      ethers.utils.parseEther(amount).toString()
+    );
 
   const tokenPrices = {};
-  for (let i = 0; i < prices.length; i++) tokenPrices[tokens[i]] = prices[i];
+  for (let i = 0; i < prices.length; i++)
+    tokenPrices[tokens[i]] = ethers.utils.formatEther(prices[i]);
 
   return tokenPrices;
 }
@@ -118,17 +105,33 @@ async function getActivePools() {
   for (let poolName of poolNames) {
     if (await stableSwap.poolExists(poolName)) pools[poolName] = poolName.split("/");
   }
-  console.log(pools);
 
   return pools;
 }
 
-async function test() {
-  const amount = ethers.utils.parseEther("1000");
-  await utmc.approve(ss.address, amount);
-  console.log(await stableSwap.swap("UTMC/UCMC/UVMC", 0, 1, amount));
+async function once() {
+  let estimates = await stableSwap.estimateDeposit("UTMC/UCMC", 0, ethers.utils.parseEther("1000"));
+  console.log(estimates.map((est) => ethers.utils.formatEther(est)));
+  const amount = ethers.utils.parseEther("10000");
+  await (await utmc.approve(ss.address, amount)).wait();
+  await (await ucmc.approve(ss.address, amount)).wait();
+  await (await stableSwap.deposit("UTMC/UCMC", [amount, amount])).wait();
+  estimates = await stableSwap.estimateDeposit("UTMC/UCMC", 0, ethers.utils.parseEther("1000"));
+  console.log(estimates.map((est) => ethers.utils.formatEther(est)));
 }
 
-await test();
+let i = 0;
+async function test() {
+  if (i === 0) await once();
+  i++;
+  //await (await utmc.approve(ss.address, ethers.utils.parseEther("1000"))).wait();
+  //console.log(
+  //  ethers.utils.formatEther(
+  //    await stableSwap.getRelativePrice("UTMC/UCMC", 0, 1, ethers.utils.parseEther("1000"))
+  //  )
+  //);
+}
 
-export { deposit, getRelativePrice, getAllTokens, swapTokens, estimatePoolPrices, getActivePools };
+//await test();
+
+export { deposit, getRelativePrice, getAllTokens, swap, estimatePoolPrices, getActivePools };

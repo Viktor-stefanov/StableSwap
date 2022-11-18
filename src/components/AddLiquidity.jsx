@@ -15,7 +15,15 @@ export default function AddLiquidity() {
   }, []);
 
   async function onTokenAmountChange(token, amount) {
-    setTokenAmounts(await estimatePoolPrices(pool, token, amount));
+    if (amount === "") {
+      setTokenAmounts({ UCMC: 0, UTMC: 0 });
+      setInputFilled(false);
+      return;
+    }
+
+    const prices = await estimatePoolPrices(pool, token, amount);
+    prices[token] = amount;
+    setTokenAmounts(prices);
     setInputFilled(true);
   }
 

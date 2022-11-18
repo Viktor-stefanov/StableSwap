@@ -1180,8 +1180,8 @@
       ]
     },
     "/home/viktor/Dev/Blockchain/StableSwap/contracts/StableSwap.sol": {
-      "lastModificationDate": 1668618977218,
-      "contentHash": "66d8df12a15ea524e3bc1018d0cfaa22",
+      "lastModificationDate": 1668780411221,
+      "contentHash": "7c61c358eb13ce9c15e78eb17e228053",
       "sourceName": "contracts/StableSwap.sol",
       "solcConfig": {
         "version": "0.8.17",

@@ -28,7 +28,7 @@ contract StableSwap is ERC20 {
     }
 
     modifier hasTokens(address[] memory tokens, uint256[] memory amounts) {
-        for (uint8 i = 0; i < tokens.length; i++)
+        for (uint128 i = 0; i < tokens.length; i++)
             require(
                 ERC20(tokens[i]).balanceOf(msg.sender) >= amounts[i],
                 "Insufficient ERC20 balance."
@@ -46,9 +46,10 @@ contract StableSwap is ERC20 {
             pool.symbols = _tokenSymbols[i];
             pool.addresses = _tokenAddresses[i];
             pool.amounts = new uint256[](pool.addresses.length);
+            pool.seedAmounts = new uint256[](pool.addresses.length);
             pool.created = true;
             string memory poolName = _tokenSymbols[i][0];
-            for (uint8 j = 1; j < _tokenSymbols[i].length; j++)
+            for (uint128 j = 1; j < _tokenSymbols[i].length; j++)
                 poolName = string.concat(poolName, "/", _tokenSymbols[i][j]);
 
             tokenPools[poolName] = pool;
@@ -59,26 +60,32 @@ contract StableSwap is ERC20 {
 
     function estimateDeposit(
         string memory _pair,
-        uint8 _token,
+        uint128 _token,
         uint256 _tokenAmount
     ) external view returns (uint256[] memory) {
         Pool memory pool = tokenPools[_pair];
-        uint256[] memory prices = new uint256[](pool.symbols.length);
+        uint256[] memory amounts = new uint256[](pool.symbols.length);
         if (!poolIsSeeded(_pair)) {
-            for (uint8 i = 0; i < pool.symbols.length; i++)
-                prices[i] =
+            for (uint128 i = 0; i < pool.symbols.length; i++)
+                amounts[i] =
+                    10**18 *
                     (priceFeed.getPrice(pool.addresses[i])) *
                     _tokenAmount;
 
-            return prices;
+            return amounts;
         }
 
         pool.amounts[_token] += _tokenAmount;
-        uint256 sum = getTotalTokensAmount(pool);
-        for (uint8 i = 0; i < pool.amounts.length; i++)
-            prices[i] = sum / pool.amounts[i];
 
-        return prices;
+        for (uint128 i = 0; i < pool.amounts.length; i++) {
+            console.log(pool.amounts[i]);
+            console.log(pool.amounts[_token]);
+            amounts[i] = pool.amounts[i] > pool.amounts[_token]
+                ? 0
+                : pool.amounts[_token] - pool.amounts[i];
+        }
+
+        return amounts;
     }
 
     function deposit(string memory _pair, uint256[] memory _amounts)
@@ -87,7 +94,7 @@ contract StableSwap is ERC20 {
         hasTokens(tokenPools[_pair].addresses, _amounts)
     {
         Pool memory pool = tokenPools[_pair];
-        for (uint8 i = 0; i < pool.symbols.length; i++) {
+        for (uint128 i = 0; i < pool.symbols.length; i++) {
             pool.amounts[i] += _amounts[i];
             ERC20(pool.addresses[i]).transferFrom(
                 msg.sender,
@@ -96,55 +103,93 @@ contract StableSwap is ERC20 {
             );
         }
 
+        if (pool.seedAmounts[0] == 0) {
+            for (uint128 i = 0; i < pool.symbols.length; i++)
+                pool.seedAmounts[i] += _amounts[i];
+        }
+
         tokenPools[_pair] = pool;
     }
 
     function swap(
         string memory _pool,
-        uint8 fromToken,
-        uint8 toToken,
+        uint128 fromToken,
+        uint128 toToken,
         uint256 amount
     ) external {
         Pool memory pool = tokenPools[_pool];
-        console.log(pool.amounts[toToken]);
+        uint256 y = getY(pool, fromToken, toToken, amount);
+        uint256 tokensOut = pool.amounts[toToken] - y;
+        pool.amounts[fromToken] += amount;
+        pool.amounts[toToken] -= tokensOut;
+        tokenPools[_pool] = pool;
+
         ERC20(pool.addresses[fromToken]).transferFrom(
             msg.sender,
             address(this),
             amount
         );
-        uint256[] memory initialAmounts = pool.amounts;
-        pool.amounts[fromToken] += amount;
-        uint256 y = getY(pool, fromToken, toToken, amount);
-        console.log(y);
+        ERC20(pool.addresses[toToken]).transfer(msg.sender, tokensOut);
+    }
+
+    function getSum(uint256[] memory nums) internal pure returns (uint256) {
+        uint256 sum;
+        for (uint128 i = 0; i < nums.length; i++) {
+            sum += nums[i];
+        }
+
+        return sum;
+    }
+
+    function getInitialPrices(Pool memory pool)
+        internal
+        pure
+        returns (uint256[] memory)
+    {
+        uint256[] memory initialPrices = new uint256[](pool.seedAmounts.length);
+        uint256 seedAmountsSum = getSum(pool.seedAmounts);
+        for (uint128 i = 0; i < pool.seedAmounts.length; i++)
+            initialPrices[i] = (10**18 * pool.seedAmounts[i]) / seedAmountsSum;
+
+        return initialPrices;
     }
 
     function getY(
         Pool memory pool,
-        uint8 fromTokenIndex,
-        uint8 toTokenIndex,
+        uint128 fromTokenIndex,
+        uint128 toTokenIndex,
         uint256 tokenInput
-    ) public pure returns (uint256) {
-        //Pool memory pool = tokenPools[_pair];
+    ) internal pure returns (uint256) {
+        uint256 nA = pool.amounts.length * 20;
         uint256 D = getD(pool);
+        //console.log("D");
+        //console.log(D);
         uint256 c = D;
         uint256 S = 0;
-        for (uint8 i = 0; i < pool.amounts.length; i++) {
-            if (i != fromTokenIndex && i == toTokenIndex) continue;
-            uint256 x = i == fromTokenIndex ? tokenInput : pool.amounts[i];
+        uint256 x;
+        for (uint128 i = 0; i < pool.amounts.length; i++) {
+            if (i == fromTokenIndex) x = pool.amounts[i] + tokenInput;
+            else if (i != toTokenIndex) x = pool.amounts[i];
+            else continue;
             S += x;
             c = (c * D) / (x * pool.amounts.length);
         }
-        c = (c * D) / (A * pool.amounts.length**2);
-        uint256 b = S + (D / A) * pool.amounts.length;
+        c = (c * D) / (nA * pool.amounts.length);
+        //console.log("c:");
+        //console.log(c);
+
+        uint256 b = S + D / nA;
+        //console.log("b:");
+        //console.log(b);
         uint256 y_prev = 0;
         uint256 y = D;
-        for (uint8 _i = 0; _i < 255; _i++) {
+        for (uint128 _i = 0; _i < 255; _i++) {
             y_prev = y;
-            y = (y * y + c) / (2 * y + b - D);
-            if (y > y_prev) {
-                if (y - y_prev <= 1) break;
+            y = (y * y + c) / ((y * 2 + b) - D);
+            if (y >= y_prev) {
+                if (y - y_prev <= 10**18) break;
             } else {
-                if (y_prev - y <= 1) break;
+                if (y_prev - y <= 10**18) break;
             }
         }
 
@@ -154,11 +199,11 @@ contract StableSwap is ERC20 {
     function getD(Pool memory pool) public pure returns (uint256) {
         uint256 n = pool.symbols.length;
         uint256 S;
-        for (uint8 i = 0; i < pool.amounts.length; i++) S += pool.amounts[i];
+        for (uint128 i = 0; i < pool.amounts.length; i++) S += pool.amounts[i];
         uint256 D = S;
-        for (uint8 i = 0; i < 255; i++) {
+        for (uint128 i = 0; i < 255; i++) {
             uint256 DP = D;
-            for (uint8 j = 0; j < pool.amounts.length; j++)
+            for (uint128 j = 0; j < pool.amounts.length; j++)
                 DP = (DP * D) / (pool.amounts[j] * n);
             uint256 Dprev = D;
             D =
@@ -188,65 +233,20 @@ contract StableSwap is ERC20 {
         return tokenPools[_pair].created;
     }
 
-    function getTotalTokensAmount(Pool memory pool)
-        internal
-        pure
-        returns (uint256)
-    {
-        uint256 sum;
-        for (uint8 i = 0; i < pool.amounts.length; i++) sum += pool.amounts[i];
+    function getRelativePrice(
+        string memory _pair,
+        uint128 _fromTokenIndex,
+        uint128 _toTokenIndex,
+        uint256 _fromTokenAmount
+    ) external view returns (uint256) {
+        Pool memory pool = tokenPools[_pair];
+        uint256 newToTokenPool = getY(
+            pool,
+            _fromTokenIndex,
+            _toTokenIndex,
+            _fromTokenAmount
+        );
 
-        return sum;
+        return pool.amounts[_toTokenIndex] - newToTokenPool;
     }
-
-    //function getRelativePrice(
-    //    string memory _pair,
-    //    uint256 _tokenAmount,
-    //    bool _t1ToT2
-    //) external view returns (uint256) {
-    //    Pool memory pool = tokenPools[_pair];
-    //    if (!poolIsSeeded(_pair))
-    //        return
-    //            _t1ToT2
-    //                ? 10**22 * priceFeed.getPrice(pool.token1Con)
-    //                : 10**22 * priceFeed.getPrice(pool.token2Con);
-
-    //    uint256 fee = _tokenAmount / 500;
-    //    uint256 invariant = A *
-    //        n**n *
-    //        (pool.token1Amount + pool.token2Amount) +
-    //        pool.D;
-    //    uint256 newToken1Pool = _t1ToT2
-    //        ? pool.token1Amount + _tokenAmount
-    //        : ((invariant - pool.D) / (A * n**n)) -
-    //            (pool.token2Amount + _tokenAmount);
-    //    uint256 newToken2Pool = _t1ToT2
-    //        ? ((invariant - pool.D) / (A * n**n)) -
-    //            (pool.token1Amount + _tokenAmount)
-    //        : pool.token2Amount + _tokenAmount;
-
-    //    console.log(pool.token1Amount);
-    //    console.log(newToken1Pool);
-    //    console.log(pool.token2Amount);
-    //    console.log(newToken2Pool);
-
-    //    return
-    //        _t1ToT2
-    //            ? pool.token2Amount - newToken2Pool
-    //            : pool.token1Amount - newToken1Pool;
-    //}
-
-    //function swap(
-    //    string memory _pair,
-    //    uint256 _tokenAmount,
-    //    bool _t1ToT2
-    //) external {
-    //    require(
-    //        _t1ToT2
-    //            ? ERC20(tokenPools[_pair].token1Con).balanceOf(msg.sender) >=
-    //                _tokenAmount
-    //            : ERC20(tokenPools[_pair].token2Con).balanceOf(msg.sender) >=
-    //                _tokenAmount,
-    //        "Insufficient ERC20 balance."
-    //    );
 }

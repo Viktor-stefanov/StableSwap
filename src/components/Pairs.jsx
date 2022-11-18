@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from "react";
-import { getAllTokens, getRelativePrice, swapTokens } from "../utils/contracts";
+import { getRelativePrice, swap, getActivePools } from "../utils/contracts";
 
 export default function Pairs() {
-  const [tokens, setTokens] = useState([]);
+  const [pools, setPools] = useState({});
+  const [pool, setPool] = useState(null);
   const [fromToken, setFromToken] = useState(null);
   const [toToken, setToToken] = useState(null);
   const [fromTokenAmount, setFromTokenAmount] = useState(null);
   const [toTokenAmount, setToTokenAmount] = useState(null);
 
   useEffect(() => {
-    async function getTokens() {
-      setTokens(await getAllTokens());
+    async function getPools() {
+      setPools(JSON.parse(JSON.stringify(await getActivePools())));
     }
-    getTokens();
+    getPools();
   }, []);
 
   async function calcOtherAmount(amount) {
@@ -22,50 +23,65 @@ export default function Pairs() {
       return;
     }
 
-    const equivalentAmount = await getRelativePrice(fromToken, toToken, amount);
+    const equivalentAmount = await getRelativePrice(pool, fromToken, toToken, amount);
     setFromTokenAmount(amount);
     setToTokenAmount(equivalentAmount);
   }
 
-  async function exchangeTokens() {
-    await swapTokens(fromToken, fromTokenAmount, toToken, toTokenAmount);
+  async function swapTokens() {
+    await swap(pool, fromToken, toToken, fromTokenAmount);
   }
 
   return (
     <>
-      <h3>Swap Interface </h3>
-      <p>Select token to swap:</p>
-      <select defaultValue={"init"} onChange={(e) => setFromToken(e.target.value)}>
-        <option value="init" disabled></option>
-        {tokens.map((token, index) => (
-          <option value={token} key={index}>
-            {token}
+      <h3>Swap Interface</h3>
+      <select defaultValue="init" onChange={(e) => setPool(e.target.value)}>
+        <option value="init" disabled />
+        {Object.keys(pools).map((poolName, index) => (
+          <option value={poolName} key={index}>
+            {poolName}
           </option>
         ))}
       </select>
-      <p>Select token to receive:</p>
-      <select defaultValue={"init"} onChange={(e) => setToToken(e.target.value)}>
-        <option value="init" disabled></option>
-        {tokens.map((token, index) => (
-          <option value={token} key={index}>
-            {token}
-          </option>
-        ))}
-      </select>
-      {fromToken && toToken && (
+      <br />
+      <br />
+
+      {pool && (
         <>
-          <p>Enter amount of {fromToken}</p>
-          <input
-            type="number"
-            value={fromTokenAmount || ""}
-            onChange={(e) => calcOtherAmount(e.target.value)}
-          />
-          {fromTokenAmount && (
+          <span>Select the token to give: </span>
+          <select defaultValue="init" onChange={(e) => setFromToken(e.target.value)}>
+            <option value="init" disabled />
+            {pool.split("/").map((token, index) => (
+              <option value={token} key={index}>
+                {token}
+              </option>
+            ))}
+          </select>
+          <br />
+
+          <span>Select the token to receive: </span>
+          <select defaultValue="init" onChange={(e) => setToToken(e.target.value)}>
+            <option value="init" disabled />
+            {pool.split("/").map((token, index) => (
+              <option value={token} key={index}>
+                {token}
+              </option>
+            ))}
+          </select>
+          <br />
+
+          {fromToken && toToken && (
             <>
-              <p>
-                {fromTokenAmount} {fromToken} trades for {toTokenAmount} {toToken}
-              </p>
-              <button onClick={exchangeTokens}>Swap</button>
+              <span>Enter {fromToken} amount: </span>
+              <input onInput={(e) => calcOtherAmount(e.target.value)} />
+              {toTokenAmount && (
+                <>
+                  <p>
+                    {fromTokenAmount} {fromToken} is exchangable for {toTokenAmount} {toToken}
+                  </p>
+                  <button onClick={swapTokens}>Swap</button>
+                </>
+              )}
             </>
           )}
         </>
